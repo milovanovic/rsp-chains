@@ -1,0 +1,18 @@
+[submodule "generators/sdf-fft"]
+	path = generators/sdf-fft
+	url = https://github.com/milovanovic/sdf-fft.git
+[submodule "generators/nco"]
+	path = generators/nco
+	url = https://github.com/milovanovic/nco.git
+[submodule "generators/plfg"]
+	path = generators/plfg
+	url = https://github.com/milovanovic/plfg.git
+[submodule "generators/logMagMux"]
+	path = generators/logMagMux
+	url = https://github.com/milovanovic/logMagMux.git
+[submodule "generators/jtag2mm"]
+	path = generators/jtag2mm
+	url = https://github.com/milovanovic/jtag2mm.git
+[submodule "generators/cfar"]
+	path = generators/cfar
+	url = https://github.com/milovanovic/cfar.git
