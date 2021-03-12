@@ -62,6 +62,9 @@ lazy val cfar = (project in file("generators/cfar"))
 lazy val uart = (project in file("generators/uart"))
   .settings(commonSettings: _*)
 
+lazy val jtag2mm = (project in file("generators/jtag2mm"))
+  .settings(commonSettings: _*)
+
 lazy val rspChain = (project in file("."))
   .dependsOn(nco, plfg, fft, logMagMux, cfar, jtag2mm, uart)
   .settings(commonSettings: _*)
