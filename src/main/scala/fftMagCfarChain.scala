@@ -14,53 +14,41 @@ import freechips.rocketchip.config.{Parameters}
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.util._
 
-import plfg._
-import nco._
 import fft._
 import magnitude._
 import cfar._
 
-
-case class RspChainVanillaParameters (
-  plfgParams      : PLFGParams[FixedPoint],
-  ncoParams       : NCOParams[FixedPoint],
+case class FftMagCfarVanillaParameters (
   fftParams       : FFTParams[FixedPoint],
   magParams       : MAGParams[FixedPoint],
   cfarParams      : CFARParams[FixedPoint],
-  plfgAddress     : AddressSet,
-  plfgRAM         : AddressSet,
-  ncoAddress      : AddressSet,
   fftAddress      : AddressSet,
   magAddress      : AddressSet,
   cfarAddress     : AddressSet,
   beatBytes       : Int
 )
 
-class RspChainVanilla(params: RspChainVanillaParameters) extends LazyModule()(Parameters.empty) {
+class FftMagCfarChainVanilla(params: FftMagCfarVanillaParameters) extends LazyModule()(Parameters.empty) {
 
-  val plfg      = LazyModule(new PLFGDspBlockMem(params.plfgAddress, params.plfgRAM, params.plfgParams, params.beatBytes))  
-  val nco       = LazyModule(new AXI4NCOLazyModuleBlock(params.ncoParams, params.ncoAddress, params.beatBytes))
   val fft       = LazyModule(new AXI4FFTBlock(address = params.fftAddress, params = params.fftParams, _beatBytes = params.beatBytes))
   val mag       = LazyModule(new AXI4LogMagMuxBlock(params.magParams, params.magAddress, _beatBytes = params.beatBytes))
   val cfar      = LazyModule(new AXI4CFARBlock(params = params.cfarParams, address = params.cfarAddress, _beatBytes = params.beatBytes))
-
+  
+  val streamNode = NodeHandle(fft.streamNode, cfar.streamNode)
+  
   // define mem
-  lazy val blocks = Seq(plfg, nco, fft, mag, cfar)
+  lazy val blocks = Seq(fft, mag, cfar)
   val bus = LazyModule(new AXI4Xbar)
   val mem = Some(bus.node)
   for (b <- blocks) {
     b.mem.foreach { _ := AXI4Buffer() := bus.node }
-    //b.mem.foreach { _ := bus.node }
   }
 
-  // connect nodes
-  nco.freq.get := plfg.streamNode
-  cfar.streamNode := AXI4StreamBuffer() := mag.streamNode := AXI4StreamBuffer() := fft.streamNode := AXI4StreamBuffer() := nco.streamNode
-  
+  cfar.streamNode := AXI4StreamBuffer() := mag.streamNode := AXI4StreamBuffer() := fft.streamNode
   lazy val module = new LazyModuleImp(this) {}
 }
 
-trait RspChainVanillaPins extends RspChainVanilla {
+trait FftMagCfarChainVanillaPins extends FftMagCfarChainVanilla {
   val beatBytes = 4
   def standaloneParams = AXI4BundleParameters(addrBits = beatBytes*8, dataBits = beatBytes*8, idBits = 1)
   
@@ -70,40 +58,23 @@ trait RspChainVanillaPins extends RspChainVanilla {
     val ioMem = InModuleBody { ioMemNode.makeIO() }
     ioMem
   }}
+  
+  val ioInNode = BundleBridgeSource(() => new AXI4StreamBundle(AXI4StreamBundleParameters(n = 4)))
+  val ioOutNode = BundleBridgeSink[AXI4StreamBundle]()
 
-  // Generate AXI-stream output
-  val ioStreamNode = BundleBridgeSink[AXI4StreamBundle]()
-  ioStreamNode := AXI4StreamToBundleBridge(AXI4StreamSlaveParameters()) := cfar.streamNode
-  val outStream = InModuleBody { ioStreamNode.makeIO() }
+  ioOutNode :=
+    AXI4StreamToBundleBridge(AXI4StreamSlaveParameters()) := 
+    streamNode := 
+    BundleBridgeToAXI4Stream(AXI4StreamMasterParameters(n = 4)) :=
+    ioInNode
+
+  val in = InModuleBody { ioInNode.makeIO() }
+  val out = InModuleBody { ioOutNode.makeIO() }
 }
 
-object RspChainVanillaApp extends App
+object FftMagCfarChainVanillaApp extends App
 {
-  // here just define parameters
-  val params = RspChainVanillaParameters (
-    plfgParams = FixedPLFGParams(
-      maxNumOfSegments = 4,
-      maxNumOfDifferentChirps = 8,
-      maxNumOfRepeatedChirps = 8,
-      maxChirpOrdinalNum = 4,
-      maxNumOfFrames = 4,
-      maxNumOfSamplesWidth = 8,
-      outputWidthInt = 16,
-      outputWidthFrac = 0
-    ),
-    ncoParams = FixedNCOParams(
-      tableSize = 128,
-      tableWidth = 16,
-      phaseWidth = 9,
-      rasterizedMode = false,
-      nInterpolationTerms = 0,
-      ditherEnable = false,
-      syncROMEnable = false,
-      phaseAccEnable = true,
-      roundingMode = RoundHalfUp,
-      pincType = Streaming,
-      poffType = Fixed
-	  ),
+  val params = FftMagCfarVanillaParameters (
     fftParams = FFTParams.fixed(
       dataWidth = 16,
       twiddleWidth = 16,
@@ -138,15 +109,12 @@ object RspChainVanillaApp extends App
       includeCASH = false,
       CFARAlgorithm = CACFARType
     ),
-    plfgAddress     = AddressSet(0x30000000, 0xFF),
-    plfgRAM         = AddressSet(0x30001000, 0xFFF),
-    ncoAddress      = AddressSet(0x30000300, 0xF),
     fftAddress      = AddressSet(0x30000100, 0xFF),
     magAddress      = AddressSet(0x30000200, 0xFF),
     cfarAddress     = AddressSet(0x30002000, 0xFFF),
     beatBytes       = 4)
 
   implicit val p: Parameters = Parameters.empty
-  val standaloneModule = LazyModule(new RspChainVanilla(params) with RspChainVanillaPins)
-  chisel3.Driver.execute(Array("--target-dir", "verilog/RspChainVanilla", "--top-name", "RspChainVanilla"), ()=> standaloneModule.module) // generate verilog code
+  val standaloneModule = LazyModule(new FftMagCfarChainVanilla(params) with FftMagCfarChainVanillaPins)
+  chisel3.Driver.execute(Array("--target-dir", "verilog/FftMagCfarChainVanilla", "--top-name", "FftMagCfarChainVanilla"), ()=> standaloneModule.module) // generate verilog code
 }
