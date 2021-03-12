@@ -1,4 +1,4 @@
-package spectrometer
+package rspChain
 
 import dspblocks._
 import dsptools._
