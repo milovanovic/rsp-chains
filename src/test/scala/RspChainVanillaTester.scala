@@ -39,13 +39,13 @@ case class RunTimeRspChainParams(
   guardWindowSize       : Int = 4,                  // maximum number of guard cells
   subWindowSize         : Option[Int] = None,       // relevant only for CASH algoithm
   fftSize               : Int = 1024,               // fft size
-  thresholdScaler       : Double = 3.5,             // thresholdScaler
+  thresholdScaler       : Double = 1.5,             // thresholdScaler
   divSum                : Option[Int] = Some(5),    // divider used for CA algorithms
   peakGrouping          : Int = 0,                  // peak grouping is disabled by default
   indexLagg             : Option[Int] = None,       // index of cell inside lagging window
   indexLead             : Option[Int] = None,       // index of cell inside leading window
   magMode               : Int = 2,                  // calculate jpl mag by default
-  logOrLinearMode       : Int = 0                   // by default linear mode is active
+  logOrLinearMode       : Int = 1                   // by default linear mode is active
 ) {
   require(isPow2(refWindowSize) & isPow2(fftSize))
   require(refWindowSize > 0 & guardWindowSize > 0)
@@ -70,7 +70,11 @@ class RspChainVanillaTester
 ) extends PeekPokeTester(dut.module) with AXI4MasterModel {
 
   def memAXI: AXI4Bundle = dut.ioMem.get
-  val numAccuWin = 4
+  val numFrames = 4
+  
+  // print fftSize
+  println(runTimeParams.fftSize.toString)
+  
   
   // plfg setup
   val segmentNumsArrayOffset = 6 * params.beatBytes
@@ -80,12 +84,12 @@ class RspChainVanillaTester
   // configure plfg registers
   // peak is expected on frequency bin equal to startingPoint * (numOfPoints / (4*tableSize))
   memWriteWord(params.plfgRAM.base, 0x24000000)
-  memWriteWord(params.plfgAddress.base + 2*params.beatBytes, numAccuWin*2) // number of frames
+  memWriteWord(params.plfgAddress.base + 2*params.beatBytes, numFrames*2)  // number of frames
   memWriteWord(params.plfgAddress.base + 4*params.beatBytes, 1)            // number of chirps
   memWriteWord(params.plfgAddress.base + 5*params.beatBytes, 16)           // start value
   memWriteWord(params.plfgAddress.base + segmentNumsArrayOffset, 1)        // number of segments for first chirp
   memWriteWord(params.plfgAddress.base + repeatedChirpNumsArrayOffset, 1)  // determines number of repeated chirps
-  memWriteWord(params.plfgAddress.base + chirpOrdinalNumsArrayOffset, 0) 
+  memWriteWord(params.plfgAddress.base + chirpOrdinalNumsArrayOffset, 0)
   memWriteWord(params.plfgAddress.base + params.beatBytes, 0)              // set reset bit to zero
   memWriteWord(params.plfgAddress.base, 1)                                 // enable bit becomes 1
   // configure registers inside fft
@@ -108,7 +112,9 @@ class RspChainVanillaTester
   
   // configure CFAR module
   memWriteWord(params.cfarAddress.base, runTimeParams.fftSize)
-  memWriteWord(params.cfarAddress.base + params.beatBytes, (runTimeParams.thresholdScaler*binPointThr).toInt)
+  memWriteWord(params.cfarAddress.base + params.beatBytes, (runTimeParams.thresholdScaler*math.pow(2.0, binPointThr)).toInt)
+  println("Threshold scaler has value:")
+  println((runTimeParams.thresholdScaler*math.pow(2.0,binPointThr)).toString)
   memWriteWord(params.cfarAddress.base + 2 * params.beatBytes, runTimeParams.logOrLinearMode)
   if (params.cfarParams.CFARAlgorithm != GOSCFARType) {
     require(runTimeParams.divSum != None)
@@ -141,10 +147,13 @@ class RspChainVanillaTester
 
   step(40)
   poke(dut.outStream.ready, true.B)
-
+  
   var outSeq = Seq[Int]()
   var peekedVal: BigInt = 0
-
+  var threshold = new Array[Double](runTimeParams.fftSize)
+  var fftBin = new Array[Int](runTimeParams.fftSize)
+  var peaks = new Array[Int](runTimeParams.fftSize)
+  
   while (outSeq.length < runTimeParams.fftSize) {
     if (peek(dut.outStream.valid) == 1 && peek(dut.outStream.ready) == 1) {
       peekedVal = peek(dut.outStream.bits.data)
@@ -152,6 +161,18 @@ class RspChainVanillaTester
     }
     step(1)
   }
+  var idx = 0
+  val fftBinWidth = log2Ceil(runTimeParams.fftSize)
+  
+  // split outSeq to fftBins, threshold and peaks
+  while (idx < runTimeParams.fftSize) {
+    threshold(idx) = outSeq(idx) >> (fftBinWidth + 1)
+    peaks(idx) = outSeq(idx) & 0x00000001
+    idx = idx + 1
+  }
+
+  // there is no need to plot those data
+  
 }
 
 class RspChainVanillaSpec extends FlatSpec with Matchers {
@@ -206,8 +227,9 @@ class RspChainVanillaSpec extends FlatSpec with Matchers {
     ),
     cfarParams = CFARParams(
       protoIn = FixedPoint(16.W, 0.BP),
-      protoThreshold = FixedPoint(16.W, 6.BP),
+      protoThreshold = FixedPoint(16.W, 3.BP),
       protoScaler = FixedPoint(16.W, 6.BP),
+      sendCut = false,
       leadLaggWindowSize = 32,
       guardWindowSize = 4,
       fftSize = 1024,

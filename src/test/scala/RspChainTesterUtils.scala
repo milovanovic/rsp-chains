@@ -48,6 +48,22 @@ object RspChainTesterUtils {
   }
   
   /**
+  * Generate sum of three complex sinusoid. Assumption is that dataWidth of the fft input is always equal to 16
+  * Scale parameter is useful when square magnitude is calculated to prevent overflow
+  */
+  def getComplexTones(numSamples: Int, f1r: Double, f2r: Double, f3r: Double, scale: Int = 1): Seq[Complex] = {
+    val shiftRange = scala.math.pow(2, 13)/scale).toInt
+    
+    val noise = (0 until numSamples).map(i => Complex(math.sqrt(Random.nextDouble + Random.nextDouble),0))
+    val s1    = (0 until numSamples).map(i => Complex(0.4 * math.cos(2 * math.Pi * f1r * i) * shiftRange, 0.4 * math.sin(2 * math.Pi * f1r * i) * shiftRange))
+    val s2    = (0 until numSamples).map(i => Complex(0.2 * math.cos(2 * math.Pi * f2r * i) * shiftRange, 0.2 * math.sin(2 * math.Pi * f2r * i) * shiftRange))
+    val s3    = (0 until numSamples).map(i => Complex(0.1 * math.cos(2 * math.Pi * f3r * i) * shiftRange, 0.1 * math.sin(2 * math.Pi * f3r * i) * shiftRange))
+    
+    // can be simplified
+    var sum   = noise.zip(s1).map { case (a, b) => a + b }.zip(s2).map { case (c, d) => c + d }.zip(s3).map{ case (e, f)  => e + f }
+ }
+  
+  /**
   * Generate random signal. Assumption is that dataWidth of the fft input is always equal to 16
   * Scale parameter is useful when square magnitude is calculated to prevent overflow
   */
