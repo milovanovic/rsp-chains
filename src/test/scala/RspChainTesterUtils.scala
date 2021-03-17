@@ -7,7 +7,9 @@ import breeze.signal.fourierTr
 import breeze.linalg._
 import breeze.plot._
 
+import scala.util.Random
 import chisel3.util.log2Up
+
 
 // Comment - almost all funtions are copied from SpectrometerTesterUtils
 
@@ -51,17 +53,18 @@ object RspChainTesterUtils {
   * Generate sum of three complex sinusoid. Assumption is that dataWidth of the fft input is always equal to 16
   * Scale parameter is useful when square magnitude is calculated to prevent overflow
   */
-  def getComplexTones(numSamples: Int, f1r: Double, f2r: Double, f3r: Double, scale: Int = 1): Seq[Complex] = {
-    val shiftRange = scala.math.pow(2, 13)/scale).toInt
+  def getComplexTones(numSamples: Int, f1r: Double, f2r: Double, f3r: Double, shiftRangeFactor: Int = 0, scale: Int = 1, noDC: Boolean = true): Seq[Complex] = {
+    val shiftRange = (scala.math.pow(2, shiftRangeFactor)/scale).toInt
     
     val noise = (0 until numSamples).map(i => Complex(math.sqrt(Random.nextDouble + Random.nextDouble),0))
-    val s1    = (0 until numSamples).map(i => Complex(0.4 * math.cos(2 * math.Pi * f1r * i) * shiftRange, 0.4 * math.sin(2 * math.Pi * f1r * i) * shiftRange))
-    val s2    = (0 until numSamples).map(i => Complex(0.2 * math.cos(2 * math.Pi * f2r * i) * shiftRange, 0.2 * math.sin(2 * math.Pi * f2r * i) * shiftRange))
-    val s3    = (0 until numSamples).map(i => Complex(0.1 * math.cos(2 * math.Pi * f3r * i) * shiftRange, 0.1 * math.sin(2 * math.Pi * f3r * i) * shiftRange))
+    val s1    = (0 until numSamples).map(i => Complex(0.4 * math.cos(2 * math.Pi * f1r * i), 0.4 * math.sin(2 * math.Pi * f1r * i)))
+    val s2    = (0 until numSamples).map(i => Complex(0.2 * math.cos(2 * math.Pi * f2r * i), 0.2 * math.sin(2 * math.Pi * f2r * i)))
+    val s3    = (0 until numSamples).map(i => Complex(0.1 * math.cos(2 * math.Pi * f3r * i), 0.1 * math.sin(2 * math.Pi * f3r * i)))
     
     // can be simplified
-    var sum   = noise.zip(s1).map { case (a, b) => a + b }.zip(s2).map { case (c, d) => c + d }.zip(s3).map{ case (e, f)  => e + f }
- }
+    var sum   = noise.zip(s1).map { case (a, b) => a + b }.zip(s2).map { case (c, d) => c + d }.zip(s3).map{ case (e, f)  => e + f }.map( c => Complex((c.real*shiftRange).toInt, (c.imag*shiftRange).toInt) )
+    sum
+  }
   
   /**
   * Generate random signal. Assumption is that dataWidth of the fft input is always equal to 16
@@ -99,10 +102,10 @@ object RspChainTesterUtils {
   /**
   * Format complex inData so that it is compatible with 32 AXI4Stream data
   */
-  def formAXI4StreamComplexData(inData : Seq[Complex], dataWidth: Int): Seq[Int] = {
+  def formAXI4StreamComplexData(inData: Seq[Complex], dataWidth: Int): Seq[Int] = {
     inData.map(data => java.lang.Long.parseLong(
-                                  asNdigitBinary(data.real.toInt, dataWidth) ++ 
-                                  asNdigitBinary(data.imag.toInt, dataWidth)).toInt)
+                                  asNdigitBinary(data.real.toInt, dataWidth) ++
+                                  asNdigitBinary(data.imag.toInt, dataWidth), 2).toInt)
   }
   
   

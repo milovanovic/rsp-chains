@@ -12,7 +12,7 @@ import chisel3.experimental._
 
 import chisel3.iotesters.PeekPokeTester
 
-//import freechips.rocketchip.amba.axi4stream._
+import freechips.rocketchip.amba.axi4stream._
 import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.config.Parameters
 import freechips.rocketchip.diplomacy._
@@ -23,75 +23,61 @@ import breeze.math.Complex
 import breeze.signal.{fourierTr, iFourierTr}
 import breeze.linalg._
 import breeze.plot._
+import scala.util.Random
 
-import plfg._
-import nco._
 import fft._
 import magnitude._
 import cfar._
 
 import java.io._
 
-case class RunTimeRspChainParams(
-  CFARAlgorithm         : Option[String] = Some("CA"),    // CFAR algorithm -> only valid when GOSCA algorithm is used
-  CFARMode              : String = "Greatest Of",   // can be "Smallest Of", "Greatest Of", "Cell Averaging", "CASH"
-  refWindowSize         : Int = 32,                 // number of cells inside 
-  guardWindowSize       : Int = 4,                  // maximum number of guard cells
-  subWindowSize         : Option[Int] = None,       // relevant only for CASH algoithm
-  fftSize               : Int = 1024,               // fft size
-  thresholdScaler       : Double = 3.5,             // thresholdScaler
-  divSum                : Option[Int] = Some(5),    // divider used for CA algorithms
-  peakGrouping          : Int = 0,                  // peak grouping is disabled by default
-  indexLagg             : Option[Int] = None,       // index of cell inside lagging window
-  indexLead             : Option[Int] = None,       // index of cell inside leading window
-  magMode               : Int = 2,                  // calculate jpl mag by default
-  logOrLinearMode       : Int = 1                   // by default linear mode is active
-) {
-  require(isPow2(refWindowSize) & isPow2(fftSize))
-  require(refWindowSize > 0 & guardWindowSize > 0)
-  require(refWindowSize > guardWindowSize)
-  if (subWindowSize != None) {
-    require(subWindowSize.get < refWindowSize)
-  }
-  if (indexLead != None) {
-    require(indexLead.get < refWindowSize)
-  }
-  if (indexLagg != None) {
-    require(indexLagg.get < refWindowSize)
-  }
-}
-
-class RspChainVanillaTester
+class FftMagCfarChainVanillaTester
 (
-  dut: RspChainVanilla with RspChainVanillaPins,
-  params: RspChainVanillaParameters,
+  dut: FftMagCfarChainVanilla with FftMagCfarChainVanillaPins,
+  params: FftMagCfarVanillaParameters,
   runTimeParams: RunTimeRspChainParams,
+  plotEn: Boolean = false,
   silentFail: Boolean = false
-) extends PeekPokeTester(dut.module) with AXI4MasterModel {
+) extends PeekPokeTester(dut.module) with AXI4StreamModel with AXI4MasterModel {
 
   def memAXI: AXI4Bundle = dut.ioMem.get
   val numFrames = 4
+  val master = bindMaster(dut.in)
+
+  val binPointFFTData = (params.fftParams.protoIQ.real match {
+    case fp: FixedPoint => fp.binaryPoint.get
+    case _ => 0
+  })
+   //window.map(c => println(c))
+  
+  val inData = RspChainTesterUtils.getComplexTones(numSamples = runTimeParams.fftSize, 0.125, 0.25, 0.5, scale = 1, shiftRangeFactor = binPointFFTData) //RspChainTesterUtils.getTone(numSamples = runTimeParams.fftSize, 0.125)
+  inData.foreach(c => println(c.toString))
+  
+  val fileInReal = new File("inputDataReal.txt")
+  val winR = new BufferedWriter(new FileWriter(fileInReal))
+  for (i <- 0 until inData.length ) {
+    winR.write(f"${inData(i).real.toInt}%04x" + "\n")
+  }
+  winR.close()
+  
+  val fileInImag = new File("inputDataImag.txt")
+  val winI = new BufferedWriter(new FileWriter(fileInImag))
+  for (i <- 0 until inData.length ) {
+    winI.write(f"${inData(i).imag.toInt}%04x" + "\n")
+  }
+  winI.close()
+  
+  //getTone()
+  // RspChainTesterUtils.getComplexTones(numSamples = runTimeParams.fftSize, 1/8, 1/4, 1/2)
+  // val axi4StreamIn = RspChainTesterUtils.formAXI4StreamRealData(inData, 16)
+  //RspChainTesterUtils.formAXI4StreamComplexData(inData, 16)
+    
+  val axi4StreamIn = RspChainTesterUtils.formAXI4StreamComplexData(inData, 16)
+
+  val fftSignal = fourierTr(DenseVector(inData.toArray)).toScalaVector.map(c => Complex(c.real/runTimeParams.fftSize, c.imag/runTimeParams.fftSize)).map(c => c.abs)
   
   // print fftSize
   println(runTimeParams.fftSize.toString)
-  
-  
-  // plfg setup
-  val segmentNumsArrayOffset = 6 * params.beatBytes
-  val repeatedChirpNumsArrayOffset = segmentNumsArrayOffset + 4 * params.beatBytes
-  val chirpOrdinalNumsArrayOffset = repeatedChirpNumsArrayOffset + 8 * params.beatBytes
-  
-  // configure plfg registers
-  // peak is expected on frequency bin equal to startingPoint * (numOfPoints / (4*tableSize))
-  memWriteWord(params.plfgRAM.base, 0x24000000)
-  memWriteWord(params.plfgAddress.base + 2*params.beatBytes, numFrames*2)  // number of frames
-  memWriteWord(params.plfgAddress.base + 4*params.beatBytes, 1)            // number of chirps
-  memWriteWord(params.plfgAddress.base + 5*params.beatBytes, 16)           // start value
-  memWriteWord(params.plfgAddress.base + segmentNumsArrayOffset, 1)        // number of segments for first chirp
-  memWriteWord(params.plfgAddress.base + repeatedChirpNumsArrayOffset, 1)  // determines number of repeated chirps
-  memWriteWord(params.plfgAddress.base + chirpOrdinalNumsArrayOffset, 0)
-  memWriteWord(params.plfgAddress.base + params.beatBytes, 0)              // set reset bit to zero
-  memWriteWord(params.plfgAddress.base, 1)                                 // enable bit becomes 1
   // configure registers inside fft
   memWriteWord(params.fftAddress.base, log2Up(runTimeParams.fftSize))               // define number of active stages
   // configure registers inside LogMagMux
@@ -144,9 +130,11 @@ class RspChainVanillaTester
     require(runTimeParams.subWindowSize != None)
     memWriteWord(params.cfarAddress.base + 11 * params.beatBytes, runTimeParams.subWindowSize.get)
   }
-
+  
   step(40)
-  poke(dut.outStream.ready, true.B)
+  poke(dut.out.ready, true.B)
+
+  master.addTransactions(axi4StreamIn.zipWithIndex.map { case (data, idx) => AXI4StreamTransaction(data = data,  last = if (idx == axi4StreamIn.length - 1) true else false) })
   
   var outSeq = Seq[Int]()
   var peekedVal: BigInt = 0
@@ -155,8 +143,8 @@ class RspChainVanillaTester
   var peaks = new Array[Int](runTimeParams.fftSize)
   
   while (outSeq.length < runTimeParams.fftSize) {
-    if (peek(dut.outStream.valid) == 1 && peek(dut.outStream.ready) == 1) {
-      peekedVal = peek(dut.outStream.bits.data)
+    if (peek(dut.out.valid) == 1 && peek(dut.out.ready) == 1) {
+      peekedVal = peek(dut.out.bits.data)
       outSeq = outSeq :+ peekedVal.toInt
     }
     step(1)
@@ -164,44 +152,50 @@ class RspChainVanillaTester
   var idx = 0
   val fftBinWidth = log2Ceil(runTimeParams.fftSize)
   
+  val fileOut = new File("outputData.txt")
+  val wout = new BufferedWriter(new FileWriter(fileOut))
+  
+  for (i <- 0 until outSeq.length ) {
+    wout.write(f"${outSeq(i)}%04x" + "\n")
+  }
+  wout.close()
   // split outSeq to fftBins, threshold and peaks
   while (idx < runTimeParams.fftSize) {
     threshold(idx) = outSeq(idx) >> (fftBinWidth + 1)
     peaks(idx) = outSeq(idx) & 0x00000001
     idx = idx + 1
   }
-
-  // there is no need to plot those data
   
+  val fileThr = new File("thresholdData.txt")
+  val wthr = new BufferedWriter(new FileWriter(fileThr))
+  
+  for (i <- 0 until outSeq.length ) {
+    wthr.write(f"${threshold(i).toInt}%04x" + "\n")
+  }
+  wthr.close()
+  
+  if (plotEn == true) {
+    val f = Figure()
+    val p = f.subplot(0)
+    p.legend_=(true)
+    val xaxis = (0 until fftSignal.size).map(e => e.toDouble).toSeq.toArray
+    p.xlabel = "Frequency bin"
+    p.ylabel = "Amplitude"
+
+    val thresholdPlot = threshold.toSeq
+
+    p += plot(xaxis, fftSignal.toArray, name = "FFT input Signal")
+    p += plot(xaxis, threshold.toArray, name = "CFAR threshold")
+    p.title_=(s"Constant False Alarm Rate")
+
+    f.saveas(s"test_run_dir/ThresholdPlot.pdf")
+  }
 }
 
-class RspChainVanillaSpec extends FlatSpec with Matchers {
+class FftMagCfarChainVanillaSpec extends FlatSpec with Matchers {
   implicit val p: Parameters = Parameters.empty
 
-  val params = RspChainVanillaParameters (
-    plfgParams = FixedPLFGParams(
-      maxNumOfSegments = 4,
-      maxNumOfDifferentChirps = 8,
-      maxNumOfRepeatedChirps = 8,
-      maxChirpOrdinalNum = 4,
-      maxNumOfFrames = 4,
-      maxNumOfSamplesWidth = 8,
-      outputWidthInt = 16,
-      outputWidthFrac = 0
-    ),
-    ncoParams = FixedNCOParams(
-      tableSize = 128,
-      tableWidth = 16,
-      phaseWidth = 9,
-      rasterizedMode = false,
-      nInterpolationTerms = 0,
-      ditherEnable = false,
-      syncROMEnable = false,
-      phaseAccEnable = true,
-      roundingMode = RoundHalfUp,
-      pincType = Streaming,
-      poffType = Fixed
-	  ),
+  val params = FftMagCfarVanillaParameters (
     fftParams = FFTParams.fixed(
       dataWidth = 16,
       twiddleWidth = 16,
@@ -213,11 +207,11 @@ class RspChainVanillaSpec extends FlatSpec with Matchers {
       expandLogic = Array.fill(log2Up(1024))(0),
       keepMSBorLSB = Array.fill(log2Up(1024))(true),
       minSRAMdepth = 1024,
-      binPoint = 0
+      binPoint = 12
     ),
     magParams = MAGParams.fixed(
       dataWidth       = 16,
-      binPoint        = 0,
+      binPoint        = 12,
       dataWidthLog    = 16,
       binPointLog     = 9,
       log2LookUpWidth = 9,
@@ -226,20 +220,18 @@ class RspChainVanillaSpec extends FlatSpec with Matchers {
       numMulPipes     = 1
     ),
     cfarParams = CFARParams(
-      protoIn = FixedPoint(16.W, 0.BP),
-      protoThreshold = FixedPoint(16.W, 3.BP),
-      protoScaler = FixedPoint(16.W, 6.BP),
-      sendCut = false,
-      leadLaggWindowSize = 32,
+      protoIn = FixedPoint(16.W, 12.BP),
+      protoThreshold = FixedPoint(16.W, 12.BP),
+      protoScaler = FixedPoint(16.W, 12.BP),
+      leadLaggWindowSize = 64,
       guardWindowSize = 4,
+      sendCut = false,
       fftSize = 1024,
       minSubWindowSize = None,
+      numMulPipes = 0,
       includeCASH = false,
       CFARAlgorithm = CACFARType
     ),
-    plfgAddress     = AddressSet(0x30000000, 0xFF),
-    plfgRAM         = AddressSet(0x30001000, 0xFFF),
-    ncoAddress      = AddressSet(0x30000300, 0xF),
     fftAddress      = AddressSet(0x30000100, 0xFF),
     magAddress      = AddressSet(0x30000200, 0xFF),
     cfarAddress     = AddressSet(0x30002000, 0xFFF),
@@ -248,11 +240,11 @@ class RspChainVanillaSpec extends FlatSpec with Matchers {
   // use all default parameters
   val runTimeParams = RunTimeRspChainParams()
 
-  behavior of "RspChain Vanilla"
+  behavior of "chain fft -> mag -> cfar"
   it should "work" in {
-    val lazyDut = LazyModule(new RspChainVanilla(params) with RspChainVanillaPins)
-    chisel3.iotesters.Driver.execute(Array("-tiwv", "-tbn", "verilator", "-tivsuv", "--target-dir", "test_run_dir/rspChainVanilla/", "--top-name", "RspChainVanilla"), () => lazyDut.module) {
-      c => new RspChainVanillaTester(lazyDut, params, runTimeParams, true)
+    val lazyDut = LazyModule(new FftMagCfarChainVanilla(params) with FftMagCfarChainVanillaPins)
+    chisel3.iotesters.Driver.execute(Array("-tiwv", "-tbn", "verilator", "-tivsuv", "--target-dir", "test_run_dir/FftMagCfarVanilla/", "--top-name", "FftMagCfarVanilla"), () => lazyDut.module) {
+      c => new FftMagCfarChainVanillaTester(lazyDut, params, runTimeParams, true)
     } should be (true)
   }
 }

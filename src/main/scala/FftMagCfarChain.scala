@@ -74,7 +74,7 @@ trait FftMagCfarChainVanillaPins extends FftMagCfarChainVanilla {
 
 object FftMagCfarChainVanillaApp extends App
 {
-  val params = FftMagCfarVanillaParameters (
+   val params = FftMagCfarVanillaParameters (
     fftParams = FFTParams.fixed(
       dataWidth = 16,
       twiddleWidth = 16,
@@ -86,11 +86,11 @@ object FftMagCfarChainVanillaApp extends App
       expandLogic = Array.fill(log2Up(1024))(0),
       keepMSBorLSB = Array.fill(log2Up(1024))(true),
       minSRAMdepth = 1024,
-      binPoint = 0
+      binPoint = 12
     ),
     magParams = MAGParams.fixed(
       dataWidth       = 16,
-      binPoint        = 0,
+      binPoint        = 12,
       dataWidthLog    = 16,
       binPointLog     = 9,
       log2LookUpWidth = 9,
@@ -99,11 +99,12 @@ object FftMagCfarChainVanillaApp extends App
       numMulPipes     = 1
     ),
     cfarParams = CFARParams(
-      protoIn = FixedPoint(16.W, 0.BP),
-      protoThreshold = FixedPoint(16.W, 0.BP),
-      protoScaler = FixedPoint(16.W, 0.BP),
+      protoIn = FixedPoint(16.W, 12.BP),
+      protoThreshold = FixedPoint(16.W, 12.BP),
+      protoScaler = FixedPoint(16.W, 12.BP),
       leadLaggWindowSize = 64,
       guardWindowSize = 4,
+      sendCut = false,
       fftSize = 1024,
       minSubWindowSize = None,
       includeCASH = false,
