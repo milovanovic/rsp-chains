@@ -20,7 +20,7 @@ import breeze.plot._
 
 import java.io._
 
-import utils._
+import dsputils._
 import fft._
 import xWRDataPreProc._
 import windowing._
@@ -28,23 +28,81 @@ import magnitude._
 import cfar._
 
 // subwindowSize in runtime needs to be equal
+// case class RunTimeRspChainParams(
+//   CFARAlgorithm         : Option[String] = Some("GOS"),   // CFAR algorithm -> only valid when GOSCA algorithm is used
+//   CFARMode              : String = "Smallest Of",         // can be "Smallest Of", "Greatest Of", "Cell Averaging", "CASH"
+//   refWindowSize         : Int = 11,                        // number of active cells inside leading/lagging window
+//   guardWindowSize       : Int = 3,                        // number of active guard cells
+//   subWindowSize         : Option[Int] = Some(8),          // relevant only for CASH algoithm
+//   fftSize               : Int = 1024,                     // fft size
+//   thresholdScaler       : Double = 4,                     // thresholdScaler - 4 je bilo za smallest of za gos je 3, za ca je bilo 2.5
+//   divSum                : Option[Int] = Some(3),          // divider used for CA algorithms
+//   peakGrouping          : Int = 1,                        // peak grouping is enabled by default
+//   indexLagg             : Option[Int] = Some(6),          // index of cell inside lagging window
+//   indexLead             : Option[Int] = Some(6),          // index of cell inside leading window
+//   magMode               : Int = 1,                        // calculate jpl mag by default
+//   logOrLinearMode       : Int = 1){
+//   //require(isPow2(refWindowSize) & isPow2(fftSize))
+//   //require(refWindowSize > 0 & guardWindowSize > 0)
+//   require(refWindowSize > 0)
+//   require(refWindowSize > guardWindowSize)
+//   if (subWindowSize != None) {
+//     require(subWindowSize.get <= refWindowSize)
+//   }
+//   if (indexLead != None) {
+//     require(indexLead.get < refWindowSize)
+//   }
+//   if (indexLagg != None) {
+//     require(indexLagg.get < refWindowSize)
+//   }
+// }
+
+
+// Parameters of chain 32 : 20 magnitude squared
+// case class RunTimeRspChainParams(
+//   CFARAlgorithm         : Option[String] = Some("CA"),   // CFAR algorithm -> only valid when GOSCA algorithm is used
+//   CFARMode              : String = "Greatest Of",         // can be "Smallest Of", "Greatest Of", "Cell Averaging", "CASH"
+//   refWindowSize         : Int = 8,                        // number of active cells inside leading/lagging window
+//   guardWindowSize       : Int = 3,                        // number of active guard cells
+//   subWindowSize         : Option[Int] = Some(8),          // relevant only for CASH algoithm
+//   fftSize               : Int = 1024,                     // fft size
+//   thresholdScaler       : Double = 100,                     // thresholdScaler - 4 je bilo za smallest of za gos je 3, za ca je bilo 2.5
+//   divSum                : Option[Int] = Some(4),          // divider used for CA algorithms
+//   peakGrouping          : Int = 1,                        // peak grouping is enabled by default
+//   indexLagg             : Option[Int] = Some(6),          // index of cell inside lagging window
+//   indexLead             : Option[Int] = Some(6),          // index of cell inside leading window
+//   magMode               : Int = 0,                        // calculate jpl mag by default-1, 0 is for squared magnitude
+//   logOrLinearMode       : Int = 1){
+//   //require(isPow2(refWindowSize) & isPow2(fftSize))
+//   //require(refWindowSize > 0 & guardWindowSize > 0)
+//   require(refWindowSize > 0)
+//   require(refWindowSize > guardWindowSize)
+//   if (subWindowSize != None) {
+//     require(subWindowSize.get <= refWindowSize)
+//   }
+//   if (indexLead != None) {
+//     require(indexLead.get < refWindowSize)
+//   }
+//   if (indexLagg != None) {
+//     require(indexLagg.get < refWindowSize)
+//   }
+// }
+
 case class RunTimeRspChainParams(
-  CFARAlgorithm         : Option[String] = Some("CA"),    // CFAR algorithm -> only valid when GOSCA algorithm is used
-  CFARMode              : String = "Smallest Of",                  // can be "Smallest Of", "Greatest Of", "Cell Averaging", "CASH"
+  CFARAlgorithm         : Option[String] = Some("CA"),   // CFAR algorithm -> only valid when GOSCA algorithm is used
+  CFARMode              : String = "Greatest Of",         // can be "Smallest Of", "Greatest Of", "Cell Averaging", "CASH"
   refWindowSize         : Int = 8,                        // number of active cells inside leading/lagging window
   guardWindowSize       : Int = 3,                        // number of active guard cells
   subWindowSize         : Option[Int] = Some(8),          // relevant only for CASH algoithm
   fftSize               : Int = 1024,                     // fft size
-  thresholdScaler       : Double = 3,                     // thresholdScaler
-  divSum                : Option[Int] = Some(3),          // divider used for CA algorithms
+  thresholdScaler       : Double = 50,                     // thresholdScaler - 4 je bilo za smallest of za gos je 3, za ca je bilo 2.5
+  divSum                : Option[Int] = Some(4),          // divider used for CA algorithms
   peakGrouping          : Int = 1,                        // peak grouping is enabled by default
-  indexLagg             : Option[Int] = None,             // index of cell inside lagging window
-  indexLead             : Option[Int] = None,             // index of cell inside leading window
-  magMode               : Int = 1,                        // calculate jpl mag by default
-  logOrLinearMode       : Int = 1
-)
- {
-  require(isPow2(refWindowSize) & isPow2(fftSize))
+  indexLagg             : Option[Int] = Some(6),          // index of cell inside lagging window
+  indexLead             : Option[Int] = Some(6),          // index of cell inside leading window
+  magMode               : Int = 0,                        // calculate jpl mag by default-1, 0 is for squared magnitude
+  logOrLinearMode       : Int = 1){
+  //require(isPow2(refWindowSize) & isPow2(fftSize))
   //require(refWindowSize > 0 & guardWindowSize > 0)
   require(refWindowSize > 0)
   require(refWindowSize > guardWindowSize)
@@ -99,7 +157,7 @@ class RSPChainReducedTester_v3(
   // fft default values of registers
   // fftSize is ok
 
-  memWriteWord(params.magAddress.base, runTimeParams.magMode) // configure jpl magnitude aproximation
+  memWriteWord(params.magAddress.base, runTimeParams.magMode)
   // configure CFAR module
   val cfarMode = runTimeParams.CFARMode match {
                    case "Cell Averaging" => 0
@@ -109,7 +167,7 @@ class RSPChainReducedTester_v3(
                    case _ => 0
                  }
 
-  val binPointThr = (params.cfarParams.protoThreshold match {
+  val binPointThr = (params.cfarParams.protoScaler match {
     case fp: FixedPoint => fp.binaryPoint.get
     case _ => 0
   })
@@ -125,27 +183,25 @@ class RSPChainReducedTester_v3(
 
   memWriteWord(params.cfarAddress.base + 2 * params.beatBytes, runTimeParams.peakGrouping)
 
-//   if  (params.cfarParams.CFARAlgorithm == GOSCACFARType) {
-//     require(runTimeParams.CFARAlgorithm != None)
-//     val cfarAlgorithm = runTimeParams.CFARAlgorithm.get match {
-//                           case "CA" => 0
-//                           case "GOS" => 1
-//                           case _ => 0
-//                         }
-//     memWriteWord(params.cfarAddress.base + 5 * params.beatBytes, cfarAlgorithm)
-//   }
+  if  (params.cfarParams.CFARAlgorithm == GOSCACFARType) {
+    require(runTimeParams.CFARAlgorithm != None)
+    val cfarAlgorithm = runTimeParams.CFARAlgorithm.get match {
+                          case "CA" => 0
+                          case "GOS" => 1
+                          case _ => 0
+                        }
+    memWriteWord(params.cfarAddress.base + 7 * params.beatBytes, cfarAlgorithm) // if it is GOSCA then CASH is excluded
+  }
 
   memWriteWord(params.cfarAddress.base + 3 * params.beatBytes, cfarMode)
   memWriteWord(params.cfarAddress.base + 5 * params.beatBytes, runTimeParams.guardWindowSize)
-  // enable peak grouping logic
-  memWriteWord(params.cfarAddress.base + 5 * params.beatBytes, runTimeParams.guardWindowSize)
 
 
-//   if (params.cfarParams.CFARAlgorithm != CACFARType) {
-//     require(runTimeParams.CFARAlgorithm != None)
-//     memWriteWord(params.cfarAddress.base + 9 * params.beatBytes, runTimeParams.indexLagg.get)
-//     memWriteWord(params.cfarAddress.base + 10 * params.beatBytes, runTimeParams.indexLead.get)
-//   }
+  if (params.cfarParams.CFARAlgorithm != CACFARType) {
+    require(runTimeParams.CFARAlgorithm != None)
+    memWriteWord(params.cfarAddress.base + 8 * params.beatBytes, runTimeParams.indexLagg.get)
+    memWriteWord(params.cfarAddress.base + 9 * params.beatBytes, runTimeParams.indexLead.get)
+  }
 
   if (params.cfarParams.CFARAlgorithm != GOSCFARType) {
     require(runTimeParams.divSum != None)
@@ -168,9 +224,9 @@ class RSPChainReducedTester_v3(
 
   var outSeq = Seq[BigInt]()
   var peekedVal: BigInt = 0
-  var threshold = new Array[Double](2*runTimeParams.fftSize)
+  var threshold = new Array[BigInt](2*runTimeParams.fftSize)
   var fftBins = new Array[Int](2*runTimeParams.fftSize)
-  var cut = new Array[Int](2*runTimeParams.fftSize)
+  var cut = new Array[BigInt](2*runTimeParams.fftSize)
   var peaks = new Array[Int](2*runTimeParams.fftSize)
   var indicesWithPeaks = Seq[Int]()
 
@@ -181,6 +237,8 @@ class RSPChainReducedTester_v3(
     }
     step(1)
   }
+  //println("BigInt data is:")
+  //println(outSeq(16).toString)
   // this data can be compared with ila result
   var idx = 0
   val fftBinWidth = log2Ceil(params.cfarParams.fftSize)
@@ -191,20 +249,30 @@ class RSPChainReducedTester_v3(
   }
   wout.close()
 
+  val outputWidthMin = if (params.cfarParams.sendCut)
+                          params.cfarParams.protoThreshold.getWidth + params.cfarParams.protoIn.getWidth + log2Ceil(params.cfarParams.fftSize) + 1
+                       else
+                          params.cfarParams.protoThreshold.getWidth + log2Ceil(params.cfarParams.fftSize) + 1
+  val axiWidth = (((outputWidthMin + 8 - 1))/8)*8
+  println(axiWidth.toString)
+
   // i guess that bigInt is represented with 64 bits
-  val axiZeros = 64 - (fftBinWidth + 1 + params.cfarParams.protoThreshold.getWidth + params.cfarParams.protoIn.getWidth)
+  val axiZeros = axiWidth - (fftBinWidth + 1 + params.cfarParams.protoThreshold.getWidth + params.cfarParams.protoIn.getWidth)
   val cutMask = ((2 << params.cfarParams.protoIn.getWidth-1) - 1)
   println(cutMask.toString)
   //  split outSeq to fftBins, threshold, cut and peaks
   while (idx < 2*params.cfarParams.fftSize) {//while (idx < params.cfarParams.fftSize) {
     fftBins(idx) = (outSeq(idx) >> 1).toInt & (params.cfarParams.fftSize-1)
-    cut(idx) = ((outSeq(idx) >> fftBinWidth + 1) & cutMask).toInt // or apply mask
-    threshold(idx) = (outSeq(idx) >> (fftBinWidth + 1 + params.cfarParams.protoIn.getWidth)).toInt
+    // println(fftBins(idx).toString) - works good
+    cut(idx) = ((outSeq(idx) >> fftBinWidth + 1) & cutMask)//.toInt // or apply mask
+    threshold(idx) = (outSeq(idx) >> (fftBinWidth + 1 + params.cfarParams.protoIn.getWidth))//.toInt
     peaks(idx) = (outSeq(idx) & 0x000000000001).toInt
     if (peaks(idx) == 1 && idx>1024)
       indicesWithPeaks = indicesWithPeaks :+ idx
     idx = idx + 1
   }
+
+  println(cut(0).toString)
 
   val f = Figure()
   val p = f.subplot(0)
@@ -213,7 +281,12 @@ class RSPChainReducedTester_v3(
   p.xlabel = "Frequency bin"
   p.ylabel = "Amplitude"
 
+/*  val cutDouble = cut.take(2*runTimeParams.fftSize).map(c => ((BigDecimal(c)/BigDecimal(math.pow(2,20))).toDouble).toDouble).toSeq
+  val thresholdDouble = threshold.take(2*runTimeParams.fftSize).map(c => (BigDecimal(c)/BigDecimal(math.pow(2,20))).toDouble).toSeq
+*/
   val cutDouble = cut.take(2*runTimeParams.fftSize).map(c => c.toDouble).toSeq
+  println(cutDouble(0).toString)
+
   val thresholdDouble = threshold.take(2*runTimeParams.fftSize).map(c => c.toDouble).toSeq
   val plotMin = 0.0000000001
 
@@ -224,16 +297,19 @@ class RSPChainReducedTester_v3(
 
   f.saveas(s"test_run_dir/ThresholdPlot.pdf")
 
-  p.ylim(Seq(plotMin, cutDouble.min).max, Seq(cutDouble.max, thresholdDouble.max).max)
+ // p.ylim(Seq(plotMin, cutDouble.min).max, Seq(cutDouble.max, thresholdDouble.max).max)
 
   if (writeOutToFile) {
       // write data to file
-    val fileCut = new File("cell_under_test.txt")
+    val magString = if (runTimeParams.magMode == 0) "_sqr" else ""
+    val fileCut = new File("cell_under_test" + magString + ".txt")
     val wCut = new BufferedWriter(new FileWriter(fileCut))
+    val drop = 0
+    val cutStore = if (drop == 1) cut.drop(1024) else cut.take(1024)
 
-    for (i <- 0 until cut.drop(1024).length) {
+    for (i <- 0 until cutStore.length) {
       //wCut.write(f"${cut(i).toInt}%04x" + "\n") // for hex data with 4 digit
-      wCut.write(f"${cut(i+1024).toInt}" + "\n")
+      wCut.write(f"${cutStore(i).toInt}" + "\n")
     }
     wCut.close()
     // TODO: Add directory where all those files are going to be stored
@@ -244,33 +320,33 @@ class RSPChainReducedTester_v3(
                         case _ => ""
                       }
     println("threshold_ca" + strEdgeMode + ".txt")
-
+    val isGOS = if (params.cfarParams.CFARAlgorithm != CACFARType) "_gos" else ""
     // write data to file
     val fileThr = runTimeParams.CFARMode match {
-                    case "Cell Averaging" => new File("threshold_ca" + strEdgeMode + ".txt")
-                    case "Greatest Of" =>  new File("threshold_go" + strEdgeMode + ".txt")
-                    case "Smallest Of" => new File("threshold_so" + strEdgeMode + ".txt")
-                    case "CASH" => new File("threshold_cash" + strEdgeMode + ".txt")
+                    case "Cell Averaging" => new File("threshold_ca" + strEdgeMode + isGOS + magString + ".txt")
+                    case "Greatest Of" =>  new File("threshold_go" + strEdgeMode + isGOS + magString + ".txt")
+                    case "Smallest Of" => new File("threshold_so" + strEdgeMode + isGOS + magString + ".txt")
+                    case "CASH" => new File("threshold_cash" + strEdgeMode + isGOS + magString + ".txt")
                     case _ => new File("")
                   }
     val wthr = new BufferedWriter(new FileWriter(fileThr))
-
-    for (i <- 0 until threshold.drop(1024).length) {
-      wthr.write(f"${threshold(i+1024).toInt}" + "\n")
+    val thrStore = if (drop == 1) threshold.drop(1024) else threshold.take(1024)
+    for (i <- 0 until thrStore.length) {
+      wthr.write(f"${thrStore(i).toInt}" + "\n")
     }
     wthr.close()
 
     val filePeaks =  runTimeParams.CFARMode match {
-                      case "Cell Averaging" => new File("ca_peaks" + strEdgeMode + ".txt")
-                      case "Greatest Of" =>  new File("go_peaks" + strEdgeMode + ".txt")
-                      case "Smallest Of" => new File("so_peaks" + strEdgeMode + ".txt")
-                      case "CASH" => new File("cash_peaks" + strEdgeMode + ".txt")
+                      case "Cell Averaging" => new File("ca_peaks" + strEdgeMode + isGOS + magString + ".txt")
+                      case "Greatest Of" =>  new File("go_peaks" + strEdgeMode + isGOS + magString + ".txt")
+                      case "Smallest Of" => new File("so_peaks" + strEdgeMode + isGOS + magString + ".txt")
+                      case "CASH" => new File("cash_peaks" + strEdgeMode + isGOS + magString + ".txt")
                       case _ => new File("")
                     }
     val wPeaks = new BufferedWriter(new FileWriter(filePeaks))
-
-    for (i <- 0 until indicesWithPeaks.length) {
-      wPeaks.write(f"${(indicesWithPeaks(i) - 1024).toInt}" + "\n")
+    val peaksStore = if (drop == 1) indicesWithPeaks.drop(1024) else indicesWithPeaks.take(1024)
+    for (i <- 0 until peaksStore.length) {
+      wPeaks.write(f"${(peaksStore(i) - 1024).toInt}" + "\n")
     }
     wPeaks.close()
   }
@@ -311,25 +387,26 @@ class RadarChainReduced_v3_Spec extends AnyFlatSpec with Matchers {
     ),
     magParams = MAGParams(
       protoIn  = FixedPoint(16.W, 10.BP),
-      protoOut = FixedPoint(24.W, 10.BP), // lets say identity node
+      protoOut =  FixedPoint(32.W, 20.BP),
       magType  = MagJPLandSqrMag,
+      binPointGrowth = 10,
       useLast = true,
       numAddPipes = 1,
       numMulPipes = 1
     ),
     cfarParams = CFARParams(
-      protoIn = FixedPoint(24.W, 10.BP),
-      protoThreshold = FixedPoint(24.W, 10.BP),
-      protoScaler = FixedPoint(16.W, 8.BP),
+      protoIn =  FixedPoint(32.W, 20.BP), // FixedPoint(32.W, 20.BP), //FixedPoint(24.W, 10.BP),
+      protoThreshold = FixedPoint(32.W, 20.BP),//FixedPoint(24.W, 10.BP),
+      protoScaler = FixedPoint(16.W, 6.BP),// for squared magnitude it requires higher values in general
       leadLaggWindowSize = 128,
       guardWindowSize = 8,
       logOrLinReg = false,
       fftSize = 1024,
       sendCut = true,
       minSubWindowSize = Some(8),
-      includeCASH = false, //true
-      CFARAlgorithm = CACFARType,
-      edgesMode = Cyclic
+      includeCASH = true, //false
+      CFARAlgorithm = CACFARType,//GOSCACFARType, //CACFARType,
+      edgesMode = Zero // cyclic
     ),
     windParams = WindowingParams.fixed(
       numPoints = 1024,
