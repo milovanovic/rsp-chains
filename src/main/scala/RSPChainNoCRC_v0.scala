@@ -9,7 +9,7 @@ import freechips.rocketchip.amba.axi4stream._
 import freechips.rocketchip.config.{Parameters}
 import freechips.rocketchip.diplomacy._
 
-import utils._
+import dsputils._
 import fft._
 import windowing._
 import xWRDataPreProc._

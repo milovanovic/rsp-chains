@@ -11,7 +11,7 @@ import freechips.rocketchip.diplomacy._
 
 import chisel3.stage.{ChiselGeneratorAnnotation, ChiselStage}
 
-import utils._
+import dsputils._
 import fft._
 import windowing._
 import xWRDataPreProc._
